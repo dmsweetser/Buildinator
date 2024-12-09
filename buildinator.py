@@ -60,17 +60,8 @@ def run_llm(prompt, input_code, language):
         llama = Llama("./model/Mistral-Nemo-Instruct-2407-Q8_0.gguf", **llama_params)
 
         # Generate complete revision of code, addressing build errors, surrounded by triple backticks
-        response = llama.create_completion(
-            f"Generate ONLY a complete revision of the {language} code, addressing any build errors, surrounded by triple backticks:\\n
-```{input_code}
-
-```\\n{prompt}",
-            **llama_params
-        )
-        output_code = response['choices'][0]['text'].split("
-```")[1].split("
-
-```")[0]
+        response = llama.create_completion( f"Generate ONLY a complete revision of the {language} code, addressing any build errors, surrounded by triple backticks:\n```{input_code}```\n{prompt}")
+        output_code = response['choices'][0]['text'].split("```")[1].split("```")[0]
         return output_code
     except Exception as e:
         # Handle LLM call failure, return input code without throwing errors
@@ -82,7 +73,7 @@ def execute_code(code, language):
     client = docker.from_env()
     container = client.containers.run(
         DOCKER_IMAGE,
-        command=f"bash -c 'echo \\"{code}\\" > main.{language} && ./main.{language}'",
+        command=f"bash -c 'echo \"{code}\" > main.{language} && ./main.{language}'",
         detach=True,
         remove=True,
         stdout=True,
