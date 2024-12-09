@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+  <body>
+    <h1>Iterations for {{ app_name }}</h1>
+    <ul>
+    {% for iteration in iterations %}
+      <li>
+        <a href="/diff/{{ app_name }}/{{ iteration.id }}">Diff</a>
+        | {{ iteration.prompt }} ({{ "Release Candidate" if iteration.is_release_candidate else "Not Release Candidate" }})
+        <pre>{{ iteration.output_code }}</pre>
+        <pre>{{ iteration.build_output }}</pre>
+      </li>
+    {% endfor %}
+    </ul>
+  </body>
+</html>
