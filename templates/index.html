@@ -1,7 +1,34 @@
 <!DOCTYPE html>
 <html>
+  <head>
+    <title>Buildinator</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
+  </head>
   <body>
-    <h1>App Builder</h1>
+    <h1>Buildinator</h1>
+    <ul>
+    {% for app in apps %}
+      <li>
+        <h2>{{ app.name }}</h2>
+        <p>Prompt: {{ app.prompt }}</p>
+        <p>Input Code: {{ app.input_code }}</p>
+        <p>Language: {{ app.language }}</p>
+        <p>Is Queued: {{ "Yes" if app.is_queued else "No" }}</p>
+        <a href="/delete_app/{{ app.id }}">Delete App</a>
+        <a href="/remove_from_queue/{{ app.id }}">Remove from Queue</a>
+        <ul>
+        {% for iteration in app.iterations %}
+          <li>
+            <p>Iteration {{ iteration.id }}</p>
+            <p>Output Code: {{ iteration.output_code }}</p>
+            <p>Build Output: {{ iteration.build_output }}</p>
+            <a href="/delete_iteration/{{ iteration.id }}">Delete Iteration</a>
+          </li>
+        {% endfor %}
+        </ul>
+      </li>
+    {% endfor %}
+    </ul>
     <form action="/build" method="post">
       <label for="app_name">App Name:</label>
       <input type="text" id="app_name" name="app_name"><br><br>

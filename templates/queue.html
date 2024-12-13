@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Build Queue</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
+  </head>
+  <body>
+    <h1>Build Queue</h1>
+    <ul>
+    {% for app in apps %}
+      <li>
+        <h2>{{ app.name }}</h2>
+        <p>Prompt: {{ app.prompt }}</p>
+        <p>Input Code: {{ app.input_code }}</p>
+        <p>Language: {{ app.language }}</p>
+        <a href="/remove_from_queue/{{ app.id }}">Remove from Queue</a>
+      </li>
+    {% endfor %}
+    </ul>
+  </body>
+</html>
