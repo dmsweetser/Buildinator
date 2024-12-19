@@ -105,8 +105,7 @@ def run_llm(prompt, input_code, language):
                 f"{config.LLM_API}/completions",
                 headers={"Authorization": f"Bearer {config.LLM_API_KEY}"},
                 json={
-                    "prompt": f"Generate ONLY a complete revision of the {language} code, addressing any build errors, surrounded by triple backticks:\\n
-```{input_code}```\\n{prompt}",
+                    "prompt": f"Generate ONLY a complete revision of the {language} code, addressing any build errors, surrounded by triple backticks:\\n```{input_code}```\\n{prompt}",
                     "max_tokens": 65536,
                     "temperature": 0.8,
                     "top_p": 0.95,
