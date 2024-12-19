@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Buildinator</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
+    <script src="https://code.jquery.com/jquery-3.2.1.min.js"></script>
+  </head>
+  <body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+      <a class="navbar-brand" href="#">Buildinator</a>
+      <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarSupportedContent">
+        <ul class="navbar-nav mr-auto">
+          <li class="nav-item active">
+            <a class="nav-link" href="#">Home <span class="sr-only">(current)</span></a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#queue">Queue</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#status">Status</a>
+          </li>
+        </ul>
+      </div>
+    </nav>
+    <div class="container">
+      <div class="row">
+        <div class="col-md-6">
+          <h2>Build App</h2>
+          <form id="build-form">
+            <div class="form-group">
+              <label for="app_name">App Name:</label>
+              <input type="text" class="form-control" id="app_name" name="app_name">
+            </div>
+            <div class="form-group">
+              <label for="prompt">Prompt:</label>
+              <textarea class="form-control" id="prompt" name="prompt"></textarea>
+            </div>
+            <div class="form-group">
+              <label for="language">Language:</label>
+              <select class="form-control" id="language" name="language">
+                <option value="py">Python</option>
+                <option value="cs">C#/.NET</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="input_code">Input Code:</label>
+              <textarea class="form-control" id="input_code" name="input_code"></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Build</button>
+          </form>
+        </div>
+        <div class="col-md-6">
+          <h2>Queue</h2>
+          <ul id="queue-list">
+          </ul>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-12">
+          <h2>Status</h2>
+          <div id="status"></div>
+        </div>
+      </div>
+    </div>
+    <script>
+      $(document).ready(function() {
+        $("#build-form").submit(function(event) {
+          event.preventDefault();
+          $.ajax({
+            type: "POST",
+            url: "/build",
+            data: $(this).serialize(),
+            success: function(data) {
+              console.log(data);
+            }
+          });
+        });
+        setInterval(function() {
+          $.ajax({
+            type: "GET",
+            url: "/queue",
+            success: function(data) {
+              $("#queue-list").html("");
+              $.each(data, function(index, app) {
+                $("#queue-list").append("<li>" + app.name + "</li>");
+              });
+            }
+          });
+          $.ajax({
+            type: "GET",
+            url: "/get_status",
+            success: function(data) {
+              $("#status").html(data);
+            }
+          });
+        }, 10000);
+      });
+    </script>
+  </body>
+</html>

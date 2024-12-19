@@ -1,16 +1,9 @@
-import os
-import json
-import sqlite3
-import subprocess
-import difflib
-from flask import Flask, render_template_string, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file
 from flask_sqlalchemy import SQLAlchemy
-from llama_cpp import Llama
+from threading import Thread
 import docker
-import tempfile
 import logging
 from queue import Queue
-from threading import Thread
 import stripe
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
@@ -171,164 +164,9 @@ def execute_code(code, language):
 build_queue = Queue()
 
 # Web interface routes
-index_template = """
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Buildinator</title>
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
-    <script src="https://code.jquery.com/jquery-3.2.1.min.js"></script>
-  </head>
-  <body>
-    <h1>Buildinator</h1>
-    <div class="accordion" id="accordionExample">
-      {% for app in apps %}
-        <div class="card">
-          <div class="card-header" id="heading{{ app.id }}">
-            <h2 class="mb-0">
-              <button class="btn btn-link" type="button" data-toggle="collapse" data-target="#collapse{{ app.id }}" aria-expanded="true" aria-controls="collapse{{ app.id }}">
-                {{ app.name }}
-              </button>
-            </h2>
-          </div>
-          <div id="collapse{{ app.id }}" class="collapse show" aria-labelledby="heading{{ app.id }}" data-parent="#accordionExample">
-            <div class="card-body">
-              <p>Prompt: {{ app.prompt }}</p>
-              <p>Input Code: {{ app.input_code }}</p>
-              <p>Language: {{ app.language }}</p>
-              <p>Is Queued: {{ "Yes" if app.is_queued else "No" }}</p>
-              <a href="/delete_app/{{ app.id }}">Delete App</a>
-              <a href="/remove_from_queue/{{ app.id }}">Remove from Queue</a>
-              <ul>
-              {% for iteration in app.iterations %}
-                <li>
-                  <p>Iteration {{ iteration.id }}</p>
-                  <p>Output Code: <img src="/download_iteration/{{ iteration.id }}"></p>
-                  <p>Build Output: {{ iteration.build_output }}</p>
-                  <a href="/delete_iteration/{{ iteration.id }}">Delete Iteration</a>
-                </li>
-              {% endfor %}
-              </ul>
-            </div>
-          </div>
-        </div>
-      {% endfor %}
-    </div>
-    <form action="/build" method="post">
-      <label for="app_name">App Name:</label>
-      <input type="text" id="app_name" name="app_name"><br><br>
-      <label for="prompt">Prompt:</label>
-      <textarea id="prompt" name="prompt"></textarea><br><br>
-      <label for="language">Language:</label>
-      <select id="language" name="language">
-        <option value="py">Python</option>
-        <option value="cs">C#/.NET</option>
-      </select><br><br>
-      <label for="input_code">Input Code:</label>
-      <textarea id="input_code" name="input_code"></textarea><br><br>
-      <input type="submit" value="Build">
-    </form>
-    <script>
-      $(document).ready(function() {
-        setInterval(function() {
-          $.ajax({
-            type: "GET",
-            url: "/get_status",
-            success: function(data) {
-              $("#status").html(data);
-            }
-          });
-        }, 10000);
-      });
-    </script>
-    <div id="status"></div>
-  </body>
-</html>
-"""
-
-payment_template = """
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Payment</title>
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
-    <script src="https://js.stripe.com/v3/"></script>
-  </head>
-  <body>
-    <h1>Payment</h1>
-    <form id="payment-form">
-      <label for="card-element">Card</label>
-      <div id="card-element">
-        <!-- A Stripe Element will be inserted here. -->
-      </div>
-      <button id="submit">Submit Payment</button>
-      <p id="payment-message"></p>
-    </form>
-    <script>
-      var stripe = Stripe('{{ payment_intent.client_secret }}');
-      var elements = stripe.elements();
-      var card = elements.create('card');
-      card.mount('#card-element');
-      var form = document.getElementById('payment-form');
-      form.addEventListener('submit', function(event) {
-        event.preventDefault();
-        stripe.confirmCardPayment('{{ payment_intent.id }}', {
-          payment_method: {
-            card: card,
-            billing_details: {
-              name: 'Jenny Rosen'
-            }
-          }
-        }).then(function(result) {
-          if (result.error) {
-            // Display error message
-            var paymentMessage = document.getElementById('payment-message');
-            paymentMessage.textContent = result.error.message;
-          } else {
-            // The payment has been processed!
-            if (result.paymentIntent.status === 'succeeded') {
-              // Show a success message to your customer
-              var paymentMessage = document.getElementById('payment-message');
-              paymentMessage.textContent = 'Payment successful!';
-              // Download iteration
-              window.location.href = '/download_iteration/{{ iteration_id }}';
-            }
-          }
-        });
-      });
-    </script>
-  </body>
-</html>
-"""
-
-queue_template = """
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Build Queue</title>
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
-  </head>
-  <body>
-    <h1>Build Queue</h1>
-    <ul>
-    {% for app in apps %}
-      <li>
-        <h2>{{ app.name }}</h2>
-        <p>Prompt: {{ app.prompt }}</p>
-        <p>Input Code: {{ app.input_code }}</p>
-        <p>Language: {{ app.language }}</p>
-        <a href="/remove_from_queue/{{ app.id }}">Remove from Queue</a>
-      </li>
-    {% endfor %}
-    </ul>
-  </body>
-</html>
-"""
-
 @app.route("/")
 def index():
-    apps = App.query.all()
-    return render_template_string(index_template, apps=apps)
+    return render_template("index.html")
 
 @app.route("/build", methods=["POST"])
 def build():
@@ -351,14 +189,14 @@ def build():
     db.session.commit()
 
     # Add app to build queue
-    build_queue.put(app)
+    build_queue.put(app.id)
 
     return jsonify({"message": "App added to build queue"})
 
 @app.route("/queue")
 def queue():
     apps = App.query.filter_by(is_queued=True).all()
-    return render_template_string(queue_template, apps=apps)
+    return render_template("queue.html", apps=apps)
 
 @app.route("/delete_app/<int:app_id>")
 def delete_app(app_id):
@@ -395,7 +233,7 @@ def download_iteration(iteration_id):
                 currency="usd",
                 payment_method_types=["card"]
             )
-            return render_template_string(payment_template, payment_intent=payment_intent, iteration_id=iteration_id)
+            return render_template("payment.html", payment_intent=payment_intent, iteration_id=iteration_id)
         else:
             # Generate PNG snapshot of code
             font = ImageFont.load_default()
@@ -417,32 +255,34 @@ def get_status():
 # Build worker
 def build_worker():
     while True:
-        app = build_queue.get()
-        if app:
-            # Run LLM
-            output_code = run_llm(app.prompt, app.input_code, app.language)
+        app_id = build_queue.get()
+        if app_id:
+            app = App.query.get(app_id)
+            if app:
+                # Run LLM
+                output_code = run_llm(app.prompt, app.input_code, app.language)
 
-            # Execute code in Docker
-            build_output = execute_code(output_code, app.language)
+                # Execute code in Docker
+                build_output = execute_code(output_code, app.language)
 
-            # Store iteration in database
-            iteration = Iteration(
-                app_name=app.name,
-                prompt=app.prompt,
-                input_code=app.input_code,
-                output_code=output_code,
-                build_output=build_output,
-                is_release_candidate=(build_output.strip() == "")
-            )
-            db.session.add(iteration)
-            db.session.commit()
+                # Store iteration in database
+                iteration = Iteration(
+                    app_name=app.name,
+                    prompt=app.prompt,
+                    input_code=app.input_code,
+                    output_code=output_code,
+                    build_output=build_output,
+                    is_release_candidate=(build_output.strip() == "")
+                )
+                db.session.add(iteration)
+                db.session.commit()
 
-            # Update app status
-            app.is_queued = False
-            db.session.commit()
+                # Update app status
+                app.is_queued = False
+                db.session.commit()
 
-            # Log build result
-            logging.info(f"Build result for {app.name}: {build_output}")
+                # Log build result
+                logging.info(f"Build result for {app.name}: {build_output}")
 
         build_queue.task_done()
 

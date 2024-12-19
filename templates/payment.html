@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Payment</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
+    <script src="https://js.stripe.com/v3/"></script>
+  </head>
+  <body>
+    <h1>Payment</h1>
+    <form id="payment-form">
+      <label for="card-element">Card</label>
+      <div id="card-element">
+        <!-- A Stripe Element will be inserted here. -->
+      </div>
+      <button id="submit">Submit Payment</button>
+      <p id="payment-message"></p>
+    </form>
+    <script>
+      var stripe = Stripe('{{ payment_intent.client_secret }}');
+      var elements = stripe.elements();
+      var card = elements.create('card');
+      card.mount('#card-element');
+      var form = document.getElementById('payment-form');
+      form.addEventListener('submit', function(event) {
+        event.preventDefault();
+        stripe.confirmCardPayment('{{ payment_intent.id }}', {
+          payment_method: {
+            card: card,
+            billing_details: {
+              name: 'Jenny Rosen'
+            }
+          }
+        }).then(function(result) {
+          if (result.error) {
+            // Display error message
+            var paymentMessage = document.getElementById('payment-message');
+            paymentMessage.textContent = result.error.message;
+          } else {
+            // The payment has been processed!
+            if (result.paymentIntent.status === 'succeeded') {
+              // Show a success message to your customer
+              var paymentMessage = document.getElementById('payment-message');
+              paymentMessage.textContent = 'Payment successful!';
+              // Download iteration
+              window.location.href = '/download_iteration/{{ iteration_id }}';
+            }
+          }
+        });
+      });
+    </script>
+  </body>
+</html>
