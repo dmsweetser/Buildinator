@@ -2,3 +2,5 @@ flask
 flask_sqlalchemy
 docker
 llama-cpp-python
+stripe
+pillow

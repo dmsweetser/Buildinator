@@ -3,7 +3,7 @@ import json
 import sqlite3
 import subprocess
 import difflib
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 from flask_sqlalchemy import SQLAlchemy
 from llama_cpp import Llama
 import docker
@@ -11,22 +11,27 @@ import tempfile
 import logging
 from queue import Queue
 from threading import Thread
+import stripe
+from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
+
+from config import Config
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///app_builder.db"
 db = SQLAlchemy(app)
 
-# Configurable options
-MAX_IDENTICAL_ITERATIONS = 3
-DOCKER_IMAGE_PYTHON = "python:3.9-slim"
-DOCKER_IMAGE_DOTNET = "mcr.microsoft.com/dotnet/sdk:6.0"
-LOGGING_ENABLED = True
+# Load config
+config = Config()
 
 # Set up logging
-if LOGGING_ENABLED:
+if config.LOGGING_ENABLED:
     logging.basicConfig(level=logging.DEBUG)
 else:
     logging.basicConfig(level=logging.INFO)
+
+# Set up Stripe
+stripe.api_key = config.STRIPE_SECRET_KEY
 
 # Database models
 class Iteration(db.Model):
@@ -55,35 +60,56 @@ class App(db.Model):
 # LLM function
 def run_llm(prompt, input_code, language):
     try:
-        # Instantiate LLM for each iteration
-        llama_params = {
-            "n_threads": 0,
-            "n_threads_batch": 0,
-            "use_mmap": False,
-            "use_mlock": False,
-            "n_gpu_layers": 0,
-            "main_gpu": 0,
-            "tensor_split": "",
-            "top_p": 0.95,
-            "n_ctx": 131072,
-            "rope_freq_base": 0,
-            "numa": False,
-            "verbose": True,
-            "top_k": 40,
-            "temperature": 0.8,
-            "repeat_penalty": 1.01,
-            "max_tokens": 65536,
-            "typical_p": 0.68,
-            "n_batch": 2048,
-            "min_p": 0,
-            "frequency_penalty": 0,
-            "presence_penalty": 0.5
-        }
-        llama = Llama("./model/Mistral-Nemo-Instruct-2407-Q8_0.gguf", **llama_params)
+        if config.LLM_API == 'local':
+            # Instantiate LLM for each iteration
+            llama_params = {
+                "n_threads": 0,
+                "n_threads_batch": 0,
+                "use_mmap": False,
+                "use_mlock": False,
+                "n_gpu_layers": 0,
+                "main_gpu": 0,
+                "tensor_split": "",
+                "top_p": 0.95,
+                "n_ctx": 131072,
+                "rope_freq_base": 0,
+                "numa": False,
+                "verbose": True,
+                "top_k": 40,
+                "temperature": 0.8,
+                "repeat_penalty": 1.01,
+                "max_tokens": 65536,
+                "typical_p": 0.68,
+                "n_batch": 2048,
+                "min_p": 0,
+                "frequency_penalty": 0,
+                "presence_penalty": 0.5
+            }
+            llama = Llama("./model/Mistral-Nemo-Instruct-2407-Q8_0.gguf", **llama_params)
 
-        # Generate complete revision of code, addressing build errors, surrounded by triple backticks
-        response = llama.create_completion( f"Generate ONLY a complete revision of the {language} code, addressing any build errors, surrounded by triple backticks:\\n```{input_code}```\\n{prompt}")
-        output_code = response['choices'][0]['text'].split("```")[1].split("```")[0]
+            # Generate complete revision of code, addressing build errors, surrounded by triple backticks
+            response = llama.create_completion( f"Generate ONLY a complete revision of the {language} code, addressing any build errors, surrounded by triple backticks:\\n```{input_code}```\\n{prompt}")
+            output_code = response['choices'][0]['text'].split("```")[1].split("```")[0]
+        else:
+            # Use OpenAI-compatible API
+            import requests
+            response = requests.post(
+                f"{config.LLM_API}/completions",
+                headers={"Authorization": f"Bearer {config.LLM_API_KEY}"},
+                json={
+                    "prompt": f"Generate ONLY a complete revision of the {language} code, addressing any build errors, surrounded by triple backticks:\\n```{input_code}```\\n{prompt}",
+                    "max_tokens": 65536,
+                    "temperature": 0.8,
+                    "top_p": 0.95,
+                    "n": 1,
+                    "stream": False,
+                    "logprobs": None,
+                    "echo": False,
+                    "stop": None,
+                    "timeout": None
+                }
+            )
+            output_code = response.json()['choices'][0]['text'].split("```")[1].split("```")[0]
         return output_code
     except Exception as e:
         # Handle LLM call failure, return input code without throwing errors
@@ -92,10 +118,10 @@ def run_llm(prompt, input_code, language):
 
 # Docker execution function
 def execute_code(code, language):
-    client = docker.from_env()
+    client = docker.DockerClient(base_url=f"{config.DOCKER_HOST}:2375")
     if language == "py":
         container = client.containers.run(
-            DOCKER_IMAGE_PYTHON,
+            config.DOCKER_IMAGE_PYTHON,
             command=f"bash -c 'echo \"{code}\" > main.py && python main.py'",
             detach=True,
             remove=True,
@@ -104,7 +130,7 @@ def execute_code(code, language):
         )
     elif language == "cs":
         container = client.containers.run(
-            DOCKER_IMAGE_DOTNET,
+            config.DOCKER_IMAGE_DOTNET,
             command=f"bash -c 'echo \"{code}\" > main.cs && dotnet run'",
             detach=True,
             remove=True,
@@ -176,6 +202,28 @@ def remove_from_queue(app_id):
         app.is_queued = False
         db.session.commit()
     return jsonify({"message": "App removed from queue"})
+
+@app.route("/download_iteration/<int:iteration_id>")
+def download_iteration(iteration_id):
+    iteration = Iteration.query.get(iteration_id)
+    if iteration:
+        if config.ENABLED:
+            # Create Stripe payment intent
+            payment_intent = stripe.PaymentIntent.create(
+                amount=1000,
+                currency="usd",
+                payment_method_types=["card"]
+            )
+            return render_template("payment.html", payment_intent=payment_intent, iteration_id=iteration_id)
+        else:
+            # Generate PNG snapshot of code
+            font = ImageFont.load_default()
+            img = Image.new('RGB', (800, 600), color = (73, 109, 137))
+            d = ImageDraw.Draw(img)
+            d.text((10,10), iteration.output_code, fill=(255,255,0), font=font)
+            img.save('code.png')
+            return send_file('code.png', as_attachment=True)
+    return jsonify({"message": "Iteration not found"})
 
 # Build worker
 def build_worker():
